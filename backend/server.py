@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, File, UploadFile
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -28,6 +28,7 @@ except ImportError:
             return b'salt'
 from bson import ObjectId
 import json
+import requests
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -41,6 +42,10 @@ db = client[os.environ['DB_NAME']]
 SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-this')
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60  # 30 days
+
+# OpenRouter Settings
+OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Security
 security = HTTPBearer()
@@ -131,6 +136,52 @@ class Conversation(BaseModel):
     last_message_time: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+class Announcement(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    content: str
+    author_id: str
+    author_name: str
+    announcement_type: str = "General"  # General, Janazah, Charity, Event
+    priority: str = "Normal"  # Low, Normal, High, Urgent
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: Optional[datetime] = None
+
+class Business(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: str
+    category: str
+    contact_info: Dict[str, str] = {}
+    address: str
+    is_halal_certified: bool = False
+    is_verified: bool = False
+    rating: float = 0.0
+    reviews_count: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class ForumTopic(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    description: str
+    category: str
+    creator_id: str
+    creator_name: str
+    posts_count: int = 0
+    last_activity: datetime = Field(default_factory=datetime.utcnow)
+    is_pinned: bool = False
+    is_locked: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class ChatMessage(BaseModel):
+    message: str
+    image_url: Optional[str] = None
+
+class BotResponse(BaseModel):
+    response: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -203,8 +254,20 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
 
 # User Routes
 @api_router.get("/users", response_model=List[User])
-async def get_users(limit: int = 50, current_user: User = Depends(get_current_user)):
-    users = await db.users.find({}).limit(limit).to_list(limit)
+async def get_users(limit: int = 50, search: str = "", current_user: User = Depends(get_current_user)):
+    query = {}
+    if search:
+        query = {
+            "$or": [
+                {"full_name": {"$regex": search, "$options": "i"}},
+                {"bio": {"$regex": search, "$options": "i"}},
+                {"skills": {"$regex": search, "$options": "i"}},
+                {"interests": {"$regex": search, "$options": "i"}},
+                {"country": {"$regex": search, "$options": "i"}}
+            ]
+        }
+    
+    users = await db.users.find(query).limit(limit).to_list(limit)
     return [User(**{k: v for k, v in user.items() if k != 'password_hash'}) for user in users]
 
 @api_router.get("/users/{user_id}", response_model=User)
@@ -280,6 +343,139 @@ async def create_comment(post_id: str, comment_data: Dict[str, Any], current_use
 async def get_comments(post_id: str, current_user: User = Depends(get_current_user)):
     comments = await db.comments.find({"post_id": post_id}).sort("created_at", 1).to_list(1000)
     return [Comment(**comment) for comment in comments]
+
+# Islamic Bot Routes
+@api_router.post("/bot/chat", response_model=BotResponse)
+async def chat_with_bot(chat_data: ChatMessage, current_user: User = Depends(get_current_user)):
+    if not OPENROUTER_API_KEY:
+        # Fallback response when API key is not available
+        fallback_responses = [
+            "As-salamu alaikum! I am here to help with Islamic knowledge. However, the AI service is currently being configured. Please check back soon, in sha Allah.",
+            "May Allah bless you! The AI assistant is temporarily unavailable. In the meantime, you can explore our Quran, Hadith, and Duas sections for Islamic guidance.",
+            "Barakallahu feeki/feek for reaching out! Our AI Islamic scholar is being set up. Please visit our learning section for authentic Islamic content."
+        ]
+        
+        import random
+        response_text = random.choice(fallback_responses)
+        
+        return BotResponse(response=response_text)
+    
+    try:
+        # Prepare Islamic context for the AI
+        islamic_context = """
+        You are an Islamic AI assistant helping Muslims with authentic Islamic knowledge. 
+        Provide guidance based on Quran and authentic Hadith. Always be respectful and accurate.
+        If unsure about something, recommend consulting local Islamic scholars.
+        Start responses with Islamic greetings when appropriate.
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # Use a free model from OpenRouter
+        data = {
+            "model": "microsoft/phi-3-mini-128k-instruct:free",  # Free model
+            "messages": [
+                {"role": "system", "content": islamic_context},
+                {"role": "user", "content": chat_data.message}
+            ],
+            "max_tokens": 500,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(OPENROUTER_API_URL, headers=headers, json=data, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            bot_response = result['choices'][0]['message']['content']
+        else:
+            bot_response = "I apologize, but I'm having trouble connecting to the knowledge base right now. Please try again later, or consult with your local Islamic scholar for guidance."
+        
+        # Store conversation in database
+        conversation_data = {
+            "id": str(uuid.uuid4()),
+            "user_id": current_user.id,
+            "user_message": chat_data.message,
+            "bot_response": bot_response,
+            "created_at": datetime.utcnow()
+        }
+        await db.bot_conversations.insert_one(conversation_data)
+        
+        return BotResponse(response=bot_response)
+        
+    except Exception as e:
+        logging.error(f"Bot chat error: {str(e)}")
+        return BotResponse(response="I apologize for the technical difficulty. Please try again later or consult with Islamic scholars for authentic guidance.")
+
+# Announcements Routes
+@api_router.get("/announcements", response_model=List[Announcement])
+async def get_announcements(limit: int = 50, current_user: User = Depends(get_current_user)):
+    announcements = await db.announcements.find({"is_active": True}).sort("created_at", -1).limit(limit).to_list(limit)
+    return [Announcement(**announcement) for announcement in announcements]
+
+@api_router.post("/announcements", response_model=Announcement)
+async def create_announcement(announcement_data: Dict[str, Any], current_user: User = Depends(get_current_user)):
+    if current_user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Only admins can create announcements")
+    
+    announcement = Announcement(
+        title=announcement_data['title'],
+        content=announcement_data['content'],
+        author_id=current_user.id,
+        author_name=current_user.full_name,
+        announcement_type=announcement_data.get('announcement_type', 'General'),
+        priority=announcement_data.get('priority', 'Normal'),
+        expires_at=announcement_data.get('expires_at')
+    )
+    
+    await db.announcements.insert_one(announcement.dict())
+    return announcement
+
+# Business Directory Routes
+@api_router.get("/businesses", response_model=List[Business])
+async def get_businesses(limit: int = 50, category: str = "", search: str = "", current_user: User = Depends(get_current_user)):
+    query = {}
+    if category:
+        query['category'] = category
+    if search:
+        query['$or'] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"description": {"$regex": search, "$options": "i"}}
+        ]
+    
+    businesses = await db.businesses.find(query).limit(limit).to_list(limit)
+    return [Business(**business) for business in businesses]
+
+@api_router.post("/businesses", response_model=Business)
+async def create_business(business_data: Dict[str, Any], current_user: User = Depends(get_current_user)):
+    business = Business(**business_data)
+    await db.businesses.insert_one(business.dict())
+    return business
+
+# Forum Routes
+@api_router.get("/forum/topics", response_model=List[ForumTopic])
+async def get_forum_topics(limit: int = 50, category: str = "", current_user: User = Depends(get_current_user)):
+    query = {}
+    if category:
+        query['category'] = category
+        
+    topics = await db.forum_topics.find(query).sort("last_activity", -1).limit(limit).to_list(limit)
+    return [ForumTopic(**topic) for topic in topics]
+
+@api_router.post("/forum/topics", response_model=ForumTopic)
+async def create_forum_topic(topic_data: Dict[str, Any], current_user: User = Depends(get_current_user)):
+    topic = ForumTopic(
+        title=topic_data['title'],
+        description=topic_data['description'],
+        category=topic_data.get('category', 'General'),
+        creator_id=current_user.id,
+        creator_name=current_user.full_name
+    )
+    
+    await db.forum_topics.insert_one(topic.dict())
+    return topic
 
 # Dashboard Stats
 @api_router.get("/dashboard/stats")
