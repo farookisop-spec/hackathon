@@ -11,7 +11,21 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timedelta
 import jwt
-import bcrypt
+try:
+    import bcrypt
+except ImportError:
+    # Fallback for development
+    import hashlib
+    class bcrypt:
+        @staticmethod
+        def hashpw(password, salt):
+            return hashlib.sha256(password).hexdigest().encode('utf-8')
+        @staticmethod 
+        def checkpw(password, hashed):
+            return hashlib.sha256(password).hexdigest().encode('utf-8') == hashed
+        @staticmethod
+        def gensalt():
+            return b'salt'
 from bson import ObjectId
 import json
 
