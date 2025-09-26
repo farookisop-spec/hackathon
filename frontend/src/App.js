@@ -21,6 +21,7 @@ import Directory from "./pages/Directory";
 import Forum from "./pages/Forum";
 import IslamicBot from "./pages/IslamicBot";
 import AdminPanel from "./pages/AdminPanel";
+import Services from "./pages/Services";
 
 // Import components
 import Navbar from "./components/Navbar";
@@ -156,6 +157,10 @@ function App() {
             <Route 
               path="/bot" 
               element={user ? <IslamicBot /> : <Navigate to="/login" />} 
+            />
+            <Route
+              path="/services"
+              element={user ? <Services /> : <Navigate to="/login" />}
             />
             <Route 
               path="/admin" 
