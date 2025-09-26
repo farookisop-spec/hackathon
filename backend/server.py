@@ -76,6 +76,16 @@ class UserCreate(BaseModel):
     full_name: str
     role: str = "member"
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    country: Optional[str] = None
+    bio: Optional[str] = None
+    skills: Optional[List[str]] = None
+    interests: Optional[List[str]] = None
+    gender: Optional[str] = None
+    date_of_birth: Optional[datetime] = None
+    social_links: Optional[Dict[str, str]] = None
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
@@ -278,9 +288,16 @@ async def get_user(user_id: str, current_user: User = Depends(get_current_user))
     return User(**{k: v for k, v in user.items() if k != 'password_hash'})
 
 @api_router.put("/users/me", response_model=User)
-async def update_profile(user_data: Dict[str, Any], current_user: User = Depends(get_current_user)):
-    user_data['updated_at'] = datetime.utcnow()
-    await db.users.update_one({"id": current_user.id}, {"$set": user_data})
+async def update_profile(user_data: UserUpdate, current_user: User = Depends(get_current_user)):
+    update_data = user_data.dict(exclude_unset=True)
+    update_data['updated_at'] = datetime.utcnow()
+
+    if update_data:
+        await db.users.update_one(
+            {"id": current_user.id},
+            {"$set": update_data}
+        )
+
     updated_user = await db.users.find_one({"id": current_user.id})
     return User(**{k: v for k, v in updated_user.items() if k != 'password_hash'})
 
