@@ -49,7 +49,8 @@ def client():
     """Pytest fixture to create a test client with mocked JSON I/O."""
     with patch('backend.server.read_json', side_effect=mock_read_json), \
          patch('backend.server.write_json', side_effect=mock_write_json):
-        yield TestClient(app)
+        with TestClient(app) as test_client:
+            yield test_client
 
 def test_update_profile_prevents_role_escalation(client: TestClient):
     """
@@ -127,3 +128,21 @@ def test_get_asma_ul_husna_failure(mock_get, client: TestClient):
     response = client.get("/api/asma-ul-husna")
     assert response.status_code == 503
     assert "Could not fetch data from UmmahAPI" in response.json()["detail"]
+
+def test_default_admin_is_created(client: TestClient):
+    """Verify that the default admin user is created on startup if no users exist."""
+    # The client fixture automatically triggers the lifespan event.
+    # We just need to check if the user was added to our mock storage.
+    admin_user = next((user for user in json_storage["users"] if user["email"] == "admin@example.com"), None)
+    assert admin_user is not None, "Default admin user was not created."
+    assert admin_user["role"] == "admin", "Default user is not an admin."
+
+def test_default_admin_login(client: TestClient):
+    """Verify that the default admin can log in."""
+    # The client fixture ensures the admin user is created.
+    response = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "admin123"},
+    )
+    assert response.status_code == 200, "Default admin login failed."
+    assert "access_token" in response.json(), "Login did not return an access token."

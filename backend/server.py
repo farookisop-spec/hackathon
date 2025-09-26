@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any, Callable
 from datetime import datetime, timedelta
 import uuid
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, File, UploadFile
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
@@ -48,8 +49,28 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Security
 security = HTTPBearer()
 
+# --- Lifespan Management ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # On startup, check if default admin exists
+    users = read_json("users")
+    if not any(user['email'] == "admin@example.com" for user in users):
+        if not users: # Only create if no users exist at all
+            admin_user = User(
+                email="admin@example.com",
+                full_name="Default Admin",
+                role="admin",
+                is_verified=True,
+                password_hash=hash_password("admin123")
+            )
+            users.append(admin_user.model_dump())
+            write_json("users", users)
+            logger.info("Default admin user created.")
+    yield
+    # On shutdown (if needed)
+
 # Create the main app
-app = FastAPI(title="Islamic Community API")
+app = FastAPI(title="Islamic Community API", lifespan=lifespan)
 
 # Create API router
 api_router = APIRouter(prefix="/api")
