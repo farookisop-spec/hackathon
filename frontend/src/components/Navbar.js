@@ -30,7 +30,8 @@ import {
   LogOut,
   Menu,
   Moon,
-  Sun
+  Sun,
+  Star
 } from 'lucide-react';
 
 const Navbar = () => {
@@ -46,6 +47,7 @@ const Navbar = () => {
     { name: 'Messages', href: '/messages', icon: MessageCircle },
     { name: 'Quran', href: '/quran', icon: BookOpen },
     { name: 'Hadith', href: '/hadith', icon: Heart },
+    { name: 'Services', href: '/services', icon: Star },
     { name: 'Duas', href: '/duas', icon: Heart },
     { name: 'Learning', href: '/learning', icon: GraduationCap },
     { name: 'Tools', href: '/tools', icon: Calculator },
